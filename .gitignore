@@ -18,6 +18,8 @@ profile
 DerivedData
 *.hmap
 *.ipa
+.swiftpm/
+IDEWorkspaceChecks.plist
 
 # Bundler
 .bundle
@@ -40,6 +42,9 @@ Pods/
 node_modules/
 jspm_packages/
 staging/
+.parcel-cache/
+.build/
+
 
 # Android
 .idea

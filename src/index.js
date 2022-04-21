@@ -26,7 +26,7 @@ class TrustWeb3Provider extends EventEmitter {
     this.isTrust = true;
     this.isDebug = !!config.isDebug;
 
-    this.emitConnect(config.chainId);
+    this.emitConnect(this.chainId);
   }
 
   setAddress(address) {
@@ -45,7 +45,8 @@ class TrustWeb3Provider extends EventEmitter {
   setConfig(config) {
     this.setAddress(config.address);
 
-    this.chainId = config.chainId;
+    this.networkVersion = "" + config.chainId;
+    this.chainId = "0x" + (config.chainId || 1).toString(16);
     this.rpc = new RPCServer(config.rpcUrl);
     this.isDebug = !!config.isDebug;
   }
@@ -71,7 +72,7 @@ class TrustWeb3Provider extends EventEmitter {
    */
   enable() {
     console.log(
-      'enable() is deprecated, please use window.ethereum.request({method: "eth_requestAccounts"}) instead.'
+      "enable() is deprecated, please use window.ethereum.request({method: \"eth_requestAccounts\"}) instead."
     );
     return this.request({ method: "eth_requestAccounts", params: [] });
   }
@@ -80,6 +81,9 @@ class TrustWeb3Provider extends EventEmitter {
    * @deprecated Use request() method instead.
    */
   send(payload) {
+    if (this.isDebug) {
+      console.log(`==> send payload ${JSON.stringify(payload)}`);
+    }
     let response = { jsonrpc: "2.0", id: payload.id };
     switch (payload.method) {
       case "eth_accounts":
@@ -116,7 +120,7 @@ class TrustWeb3Provider extends EventEmitter {
       that = window.ethereum;
     }
     if (Array.isArray(payload)) {
-      Promise.all(payload.map(that._request.bind(that)))
+      Promise.all(payload.map((_payload) => that._request(_payload)))
         .then((data) => callback(null, data))
         .catch((error) => callback(error, null));
     } else {
@@ -176,6 +180,8 @@ class TrustWeb3Provider extends EventEmitter {
           return this.wallet_watchAsset(payload);
         case "wallet_addEthereumChain":
           return this.wallet_addEthereumChain(payload);
+        case "wallet_switchEthereumChain":
+          return this.wallet_switchEthereumChain(payload);
         case "eth_newFilter":
         case "eth_newBlockFilter":
         case "eth_newPendingTransactionFilter":
@@ -206,6 +212,11 @@ class TrustWeb3Provider extends EventEmitter {
     this.emit("connect", { chainId: chainId });
   }
 
+  emitChainChanged(chainId) {
+    this.emit("chainChanged", chainId);
+    this.emit("networkChanged", chainId);
+  }
+
   eth_accounts() {
     return this.address ? [this.address] : [];
   }
@@ -215,11 +226,11 @@ class TrustWeb3Provider extends EventEmitter {
   }
 
   net_version() {
-    return this.chainId.toString(10) || null;
+    return this.networkVersion;
   }
 
   eth_chainId() {
-    return "0x" + this.chainId.toString(16);
+    return this.chainId;
   }
 
   eth_sign(payload) {
@@ -280,6 +291,10 @@ class TrustWeb3Provider extends EventEmitter {
 
   wallet_addEthereumChain(payload) {
     this.postMessage("addEthereumChain", payload.id, payload.params[0]);
+  }
+
+  wallet_switchEthereumChain(payload) {
+    this.postMessage("switchEthereumChain", payload.id, payload.params[0]);
   }
 
   /**

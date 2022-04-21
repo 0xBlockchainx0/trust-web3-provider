@@ -19,14 +19,24 @@ window.ethereum.isTrust
 
 ### iOS
 
-TrustWeb3Provider is available through [CocoaPods](http://cocoapods.org). To install
-it, simply add the following line to your Podfile:
+TrustWeb3Provider is available through CocoaPods and SPM (locally due to Xcode git lfs issue).
 
+CocoaPods
+
+Add this line to your `Podfile`:
 ```ruby
-pod 'TrustWeb3Provider', git: 'https://github.com/trustwallet/trust-web3-provider', tag: '<latest_tag>'
+pod 'TrustWeb3Provider', :git => 'https://github.com/trustwallet/trust-web3-provider', :branch => 'master'
 ```
 
-Here is an example project located at `ios/TrustWeb3Provider.xcworkspace` to demonstrate how to use this provider.
+Swift Package Manager
+
+Add this repo as a `git submodule`, then add it this to your `Package.swift`:
+
+```swift
+.package(name: "TrustWeb3Provider", path: "<local path>"),
+```
+
+Here is an example project located at `ios/TrustWeb3Provider.xcodeproj` to demonstrate how to use this provider.
 
 ### Android
 
@@ -50,7 +60,7 @@ Step 2. Add the dependency
 
 ```groovy
 dependencies {
-    implementation 'com.github.TrustWallet:trust-web3-provider:1.0.4'
+    implementation 'com.github.trustwallet:trust-web3-provider:TAG'
 }
 ```
 

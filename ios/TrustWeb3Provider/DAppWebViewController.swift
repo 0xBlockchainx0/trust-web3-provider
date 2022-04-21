@@ -7,36 +7,44 @@
 import UIKit
 import WebKit
 import WalletCore
+import TrustWeb3Provider
 
 class DAppWebViewController: UIViewController {
 
     @IBOutlet weak var urlField: UITextField!
 
     var homepage: String {
-        return "http://js-eth-sign.surge.sh/"
+        return "https://chainlist.org"
     }
 
-    let privateKey = PrivateKey(data: Data(hexString: "0x4646464646464646464646464646464646464646464646464646464646464646")!)!
+    static let privateKey = PrivateKey(data: Data(hexString: "0x4646464646464646464646464646464646464646464646464646464646464646")!)!
 
-    lazy var scriptConfig: WKUserScriptConfig = {
-        return WKUserScriptConfig(
-            address: address,
-            chainId: 56,
-            rpcUrl: "https://bsc-dataseed2.binance.org"
+    var current: TrustWeb3Provider = TrustWeb3Provider(
+        address: "0x9d8a62f656a8d1615c1294fd71e9cfb3e4855a4f",
+        chainId: 1,
+        rpcUrl: "https://cloudflare-eth.com"
+    )
+
+    var providers: [Int: TrustWeb3Provider] = [
+        42161: TrustWeb3Provider(
+            address: "0x9d8a62f656a8d1615c1294fd71e9cfb3e4855a4f",
+            chainId: 42161,
+            rpcUrl: "https://arb1.arbitrum.io/rpc"
+        ),
+        250: TrustWeb3Provider(
+            address: "0x9d8a62f656a8d1615c1294fd71e9cfb3e4855a4f",
+            chainId: 250,
+            rpcUrl: "https://rpc.ftm.tools"
         )
-    }()
-
-    lazy var address: String = {
-        return CoinType.ethereum.deriveAddress(privateKey: privateKey).lowercased()
-    }()
+    ]
 
     lazy var webview: WKWebView = {
         let config = WKWebViewConfiguration()
 
         let controller = WKUserContentController()
-        controller.addUserScript(scriptConfig.providerScript)
-        controller.addUserScript(scriptConfig.injectedScript)
-        controller.add(self, name: "_tw_")
+        controller.addUserScript(current.providerScript)
+        controller.addUserScript(current.injectScript)
+        controller.add(self, name: TrustWeb3Provider.scriptHandlerName)
 
         config.userContentController = controller
 
@@ -124,11 +132,26 @@ extension DAppWebViewController: WKScriptMessageHandler {
             let recovered = ecRecover(signature: tuple.signature, message: tuple.message) ?? ""
             print(recovered)
             DispatchQueue.main.async {
-                self.webview.sendResult(recovered, to: id)
+                self.webview.tw.send(result: recovered, to: id)
             }
         case .addEthereumChain:
-            guard let (chainId, name, rpcUrls) = extractChainInfo(json: json) else { return }
-            alert(title: name, message: "chainId: \(chainId)\n \(rpcUrls.joined(separator: "\n")))")
+            guard let (chainId, name, rpcUrls) = extractChainInfo(json: json) else {
+                print("extract chain info error")
+                return
+            }
+            if providers[chainId] != nil {
+                handleSwitchChain(id: id, chainId: chainId)
+            } else {
+                handleAddChain(id: id, name: name, chainId: chainId, rpcUrls: rpcUrls)
+            }
+        case .switchEthereumChain:
+            guard
+                let chainId = extractChainId(json: json)
+            else {
+                print("chain id is invalid")
+                return
+            }
+            handleSwitchChain(id: id, chainId: chainId)
         default:
             break
         }
@@ -140,13 +163,13 @@ extension DAppWebViewController: WKScriptMessageHandler {
             message: "\(webview.url?.host! ?? "Website") would like to connect your account",
             preferredStyle: .alert
         )
-        let address = scriptConfig.address
+        let address = current.address
         alert.addAction(UIAlertAction(title: "Cancel", style: .destructive, handler: { [weak webview] _ in
-            webview?.sendError("Canceled", to: id)
+            webview?.tw.send(error: "Canceled", to: id)
         }))
         alert.addAction(UIAlertAction(title: "Connect", style: .default, handler: { [weak webview] _ in
             webview?.evaluateJavaScript("window.ethereum.setAddress(\"\(address)\");", completionHandler: nil)
-            webview?.sendResults([address], to: id)
+            webview?.tw.send(results: [address], to: id)
         }))
         present(alert, animated: true, completion: nil)
     }
@@ -158,11 +181,11 @@ extension DAppWebViewController: WKScriptMessageHandler {
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .destructive, handler: { [weak webview] _ in
-            webview?.sendError("Canceled", to: id)
+            webview?.tw.send(error: "Canceled", to: id)
         }))
         alert.addAction(UIAlertAction(title: "OK", style: .default, handler: { [weak webview] _ in
             let signed = self.signMessage(data: data, addPrefix: addPrefix)
-            webview?.sendResult("0x" + signed.hexString, to: id)
+            webview?.tw.send(result: "0x" + signed.hexString, to: id)
         }))
         present(alert, animated: true, completion: nil)
     }
@@ -174,13 +197,62 @@ extension DAppWebViewController: WKScriptMessageHandler {
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .destructive, handler: { [weak webview] _ in
-            webview?.sendError("Canceled", to: id)
+            webview?.tw.send(error: "Canceled", to: id)
         }))
         alert.addAction(UIAlertAction(title: "OK", style: .default, handler: { [weak webview] _ in
             let signed = self.signMessage(data: data, addPrefix: false)
-            webview?.sendResult("0x" + signed.hexString, to: id)
+            webview?.tw.send(result: "0x" + signed.hexString, to: id)
         }))
         present(alert, animated: true, completion: nil)
+    }
+
+    func handleAddChain(id: Int64, name: String, chainId: Int, rpcUrls: [String]) {
+        let alert = UIAlertController(
+            title: "Add: " + name,
+            message: "ChainId: \(chainId)\nRPC: \(rpcUrls.joined(separator: "\n"))",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .destructive, handler: { [weak webview] _ in
+            webview?.tw.send(error: "Canceled", to: id)
+        }))
+        alert.addAction(UIAlertAction(title: "Add", style: .default, handler: { [weak self] _ in
+            guard let `self` = self else { return }
+            self.providers[chainId] = TrustWeb3Provider(address: self.current.address, chainId: chainId, rpcUrl: rpcUrls[0])
+            print("\(name) added")
+            self.webview.tw.sendNull(id: id)
+        }))
+        present(alert, animated: true, completion: nil)
+    }
+
+    func handleSwitchChain(id: Int64, chainId: Int) {
+        guard let provider = providers[chainId] else {
+            alert(title: "Error", message: "Unknown chain id: \(chainId)")
+            webview.tw.send(error: "Unknown chain id", to: id)
+            return
+        }
+
+        if chainId == current.chainId {
+            print("No need to switch, already on chain \(chainId)")
+            webview.tw.sendNull(id: id)
+        } else {
+
+            let alert = UIAlertController(
+                title: "Switch Chain",
+                message: "ChainId: \(chainId)\nRPC: \(provider.rpcUrl)",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Cancel", style: .destructive, handler: { [weak webview] _ in
+                webview?.tw.send(error: "Canceled", to: id)
+            }))
+            alert.addAction(UIAlertAction(title: "OK", style: .default, handler: { [weak self] _ in
+                guard let `self` = self else { return }
+                self.current = provider
+                self.webview.tw.set(address: provider.address, chainId: provider.chainId, rpcUrl: provider.rpcUrl)
+                self.webview.tw.emitChange(chainId: chainId)
+                self.webview.tw.sendNull(id: id)
+            }))
+            present(alert, animated: true, completion: nil)
+        }
     }
 
     func alert(title: String, message: String) {
@@ -215,16 +287,29 @@ extension DAppWebViewController: WKScriptMessageHandler {
         return (Data(hexString: signature)!, Data(hexString: message)!)
     }
 
-    private func extractChainInfo(json: [String: Any]) ->(chainId: String, name: String, rpcUrls: [String])? {
+    private func extractChainInfo(json: [String: Any]) ->(chainId: Int, name: String, rpcUrls: [String])? {
         guard
             let params = json["object"] as? [String: Any],
             let string = params["chainId"] as? String,
+            let chainId = Int(String(string.dropFirst(2)), radix: 16),
             let name = params["chainName"] as? String,
             let urls = params["rpcUrls"] as? [String]
         else {
             return nil
         }
-        return (chainId: string, name: name, rpcUrls: urls)
+        return (chainId: chainId, name: name, rpcUrls: urls)
+    }
+
+    private func extractChainId(json: [String: Any]) -> Int? {
+        guard
+            let params = json["object"] as? [String: Any],
+            let string = params["chainId"] as? String,
+            let chainId = Int(String(string.dropFirst(2)), radix: 16),
+            chainId > 0
+        else {
+            return nil
+        }
+        return chainId
     }
 
     private func extractRaw(json: [String: Any]) -> String? {
@@ -239,7 +324,7 @@ extension DAppWebViewController: WKScriptMessageHandler {
 
     private func signMessage(data: Data, addPrefix: Bool = true) -> Data {
         let message = addPrefix ? Hash.keccak256(data: ethereumMessage(for: data)) : data
-        var signed = privateKey.sign(digest: message, curve: .secp256k1)!
+        var signed = Self.privateKey.sign(digest: message, curve: .secp256k1)!
         signed[64] += 27
         return signed
     }
